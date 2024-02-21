@@ -449,3 +449,34 @@ copyinstr(pagetable_t pagetable, char *dst, uint64 srcva, uint64 max)
     return -1;
   }
 }
+
+int _vmprint(pagetable_t pagetable, int level){
+  
+  for(int i=0;i<512;i++){
+    pte_t pte = pagetable[i];
+    if(pte & PTE_V){
+      //get physical address
+      uint64 pa = PTE2PA(pte);
+      for(int i=0;i<level;i++){
+        printf("..");
+      }
+      printf("%d:pte 0x%p pa 0x%p\n",i,pte,pa);
+    
+    if((pte & PTE_V) && (pte & (PTE_R|PTE_W|PTE_X)) == 0){   
+    _vmprint((pagetable_t)pa,++level);
+    }
+  }
+
+  
+  }
+ return 0;
+}
+
+int vmprint(pagetable_t pagetable){
+  pagetable_t p = pagetable;
+  printf("page table %p\n",p);
+  //print PTEs
+  _vmprint(p,1);
+  return 0;
+}
+

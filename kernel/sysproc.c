@@ -75,7 +75,15 @@ int
 sys_pgaccess(void)
 {
   // lab pgtbl: your code here.
-  return 0;
+  uint64 a;
+  int check_pgnum;
+  uint64 abits = 0;
+  
+  argaddr(0,&a);
+  argint(1,&check_pgnum);
+  argaddr(2,&abits);
+
+  return spgaccess(a,check_pgnum,abits);
 }
 #endif
 
@@ -100,3 +108,4 @@ sys_uptime(void)
   release(&tickslock);
   return xticks;
 }
+

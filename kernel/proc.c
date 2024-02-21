@@ -131,7 +131,12 @@ found:
     release(&p->lock);
     return 0;
   }
-
+  //allocate a user readable page for user
+  if((p->usyscall = (struct usyscall *)kalloc()) == 0){
+    freeproc(p);
+    release(&p->lock);
+    return 0;
+  }
   // An empty user page table.
   p->pagetable = proc_pagetable(p);
   if(p->pagetable == 0){
@@ -146,6 +151,11 @@ found:
   p->context.ra = (uint64)forkret;
   p->context.sp = p->kstack + PGSIZE;
 
+  //speed up syscall
+  p->usyscall->pid = p->pid;
+
+  //init access bitmask
+  p->access_mask = 0; 
   return p;
 }
 
@@ -158,6 +168,9 @@ freeproc(struct proc *p)
   if(p->trapframe)
     kfree((void*)p->trapframe);
   p->trapframe = 0;
+  if(p->usyscall)
+    kfree((void*)p->usyscall);
+  p->usyscall = 0;
   if(p->pagetable)
     proc_freepagetable(p->pagetable, p->sz);
   p->pagetable = 0;
@@ -168,6 +181,7 @@ freeproc(struct proc *p)
   p->chan = 0;
   p->killed = 0;
   p->xstate = 0;
+  p->access_mask =0;
   p->state = UNUSED;
 }
 
@@ -202,6 +216,12 @@ proc_pagetable(struct proc *p)
     return 0;
   }
 
+  // map the usyscall page below the trampframe page, for speed up syscall
+  if(mappages(pagetable,USYSCALL,PGSIZE,(uint64)(p->usyscall),PTE_U|PTE_R) < 0){
+    uvmfree(pagetable,0);
+    return 0;
+  }
+
   return pagetable;
 }
 
@@ -212,6 +232,7 @@ proc_freepagetable(pagetable_t pagetable, uint64 sz)
 {
   uvmunmap(pagetable, TRAMPOLINE, 1, 0);
   uvmunmap(pagetable, TRAPFRAME, 1, 0);
+  uvmunmap(pagetable,USYSCALL,1,0);
   uvmfree(pagetable, sz);
 }
 
@@ -321,6 +342,7 @@ fork(void)
   acquire(&np->lock);
   np->state = RUNNABLE;
   release(&np->lock);
+
 
   return pid;
 }
@@ -685,4 +707,27 @@ procdump(void)
     printf("%d %s %s", p->pid, state, p->name);
     printf("\n");
   }
+}
+
+
+int spgaccess(uint64 a,int check_pgnum,uint64 abits){
+  //find wall user pages
+   pte_t *pte;
+   struct proc *p = myproc();
+   //vmprint(p->pagetable);
+   for(int i =0;i<32;i++,a += PGSIZE){
+    pte = walk(p->pagetable,a,0);
+    //printf("pte: %p\n",*pte);
+    if(pte == 0){
+      return -1;
+    }
+    if((*pte & PTE_A)){
+      p->access_mask |= (1l << i);
+      *pte ^= PTE_A;
+    }
+  }
+  if(copyout(p->pagetable,abits,(char *)&p->access_mask,sizeof(abits)) < 0){
+    return -1;
+  }
+   return p->access_mask;
 }
