@@ -21,6 +21,7 @@ struct run {
 struct {
   struct spinlock lock;
   struct run *freelist;
+  int   count_ref[PHYSTOP/PGSIZE];
 } kmem;
 
 void
@@ -35,8 +36,10 @@ freerange(void *pa_start, void *pa_end)
 {
   char *p;
   p = (char*)PGROUNDUP((uint64)pa_start);
-  for(; p + PGSIZE <= (char*)pa_end; p += PGSIZE)
+  for(; p + PGSIZE <= (char*)pa_end; p += PGSIZE){
+    kmem.count_ref[(uint64)p / PGSIZE] = 1;
     kfree(p);
+  }
 }
 
 // Free the page of physical memory pointed at by pa,
@@ -55,10 +58,18 @@ kfree(void *pa)
   memset(pa, 1, PGSIZE);
 
   r = (struct run*)pa;
-
+  int pn = (uint64)r/PGSIZE;
   acquire(&kmem.lock);
-  r->next = kmem.freelist;
-  kmem.freelist = r;
+  if(kmem.count_ref[pn] < 1)
+    panic("ref count less than 1");
+  
+  if(kmem.count_ref[pn] > 1){
+    kmem.count_ref[pn]--;
+  }
+  else{
+    r->next = kmem.freelist;
+    kmem.freelist = r;
+  }
   release(&kmem.lock);
 }
 
@@ -72,8 +83,12 @@ kalloc(void)
 
   acquire(&kmem.lock);
   r = kmem.freelist;
-  if(r)
+  if(r){
     kmem.freelist = r->next;
+    int pn = (uint64)r/PGSIZE;
+
+    kmem.count_ref[pn]++;
+  }
   release(&kmem.lock);
 
   if(r)
